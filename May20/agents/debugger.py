@@ -1,18 +1,14 @@
 from base_agent import BaseAgent
 
 class DebuggerAgent(BaseAgent):
-    
-    def __init__(self,name,tools):
-        super().__init__(name,tools,role="debugger")
-    
-    async def act(self,message,context):
-
-        code=context.get("latest_code",message)
-        lint_report=await self.tools["linter"].lint(code)
-        exec_report=await self.tools["executor"].execute(code)
-        feedback=f"Linter Report: \n{lint_report}\n\nExecution Report: \n{exec_report}"
-
-        return feedback
-    
-
-    
+    async def act(self, message, context):
+        # Use LLM for debugging help
+        prompt = f"""You are an expert Python debugger. Analyze the following user input, point out bugs or improvements, and suggest fixes.
+User input: {message}
+Context: {context}
+Give a short explanation and corrected code if needed.
+"""
+        llm = self.tools.get("llm")
+        if llm:
+            return await llm.complete(prompt)
+        return "# LLM is not available."
