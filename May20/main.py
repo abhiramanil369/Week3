@@ -9,7 +9,7 @@ import asyncio
 
 python_executor = PythonExecutorTool()
 pylint_linter = PylintLinterTool()
-llm_tool = GeminiFlashTool()  # Uses Gemini Flash
+llm_tool = GeminiFlashTool() 
 
 coder = CoderAgent(name="Coder", tools=[python_executor, pylint_linter, llm_tool], role="coder")
 debugger = DebuggerAgent(name="Debugger", tools=[python_executor, pylint_linter, llm_tool], role="debugger")

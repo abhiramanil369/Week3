@@ -11,5 +11,4 @@ class RoundRobinGroupChat:
         return response
 
     def _build_context(self, chat_history):
-        # For now, just return empty context
         return {}

@@ -2,7 +2,6 @@ from base_agent import BaseAgent
 
 class CoderAgent(BaseAgent):
     async def act(self, message, context):
-        # Use LLM for code generation
         prompt = f"""You are a helpful coding assistant. Write or improve Python code as requested by the user.
 Request: {message}
 Context: {context}
