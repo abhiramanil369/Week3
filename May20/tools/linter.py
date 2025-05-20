@@ -10,7 +10,7 @@ class PylintLinterTool:
         return await loop.run_in_executor(None,self._lint_sync,code)
     
     def _lint_sync(self,code:str)->str:
-        with tempfile.NamedTemporaryFile(suffix=".py",delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix='.py',mode='w',delete=False) as f:
             f.write(code)
             temp_path=f.name
 

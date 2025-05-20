@@ -2,7 +2,7 @@ class BaseAgent:
     def __init__(self,name,tools,role):
         self.name=name
         self.role=role
-        self.tools={tools.name: tool for tool in tools}
+        self.tools={tool.name: tool for tool in tools}
         self.llm=self.init_llm()
 
     def init_llm(self):
