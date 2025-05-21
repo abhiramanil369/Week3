@@ -1,79 +1,69 @@
 import asyncio
 import pandas as pd
 import matplotlib.pyplot as plt
+import json
+import google.auth
+from google.auth.transport.requests import AuthorizedSession
 
-from autogen import tool, UserProxyAgent, GroupChatManager
-from autogen.agentchat.contrib.gemini import GeminiAgent
+# Set your GCP info
+PROJECT_ID = "Data Pipeline"
+REGION = "asia-south1"  # Or another region like asia-south1
+MODEL = "gemini-1.5-flash"
 
-# ----------- Tools -----------
+# Setup credentials
+credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+authed_session = AuthorizedSession(credentials)
 
-@tool
-def load_csv(filepath: str):
-    """Load CSV and return summary statistics."""
-    df = pd.read_csv(filepath)
-    return {
-        "summary": df.describe().to_string(),
-        "columns": df.columns.tolist(),
-        "shape": df.shape
+async def call_gemini_flash(prompt: str):
+    endpoint = f"https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{REGION}/publishers/google/models/{MODEL}:predict"
+    payload = {
+        "instances": [
+            {
+                "prompt": prompt,
+            }
+        ],
+        "parameters": {
+            "temperature": 0.7,
+            "maxOutputTokens": 500,
+            "topP": 0.8,
+            "topK": 40
+        }
     }
+    response = authed_session.post(endpoint, json=payload)
+    response.raise_for_status()
+    return response.json()
 
-@tool
-def generate_plot(filepath: str, x_col: str, y_col: str, output_path: str = "plot.png"):
-    """Generate a plot for given columns and save it."""
-    df = pd.read_csv(filepath)
-    plt.figure(figsize=(10, 6))
-    plt.plot(df[x_col], df[y_col], marker='o')
-    plt.xlabel(x_col)
-    plt.ylabel(y_col)
-    plt.title(f"{y_col} vs {x_col}")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(output_path)
-    return f"Plot saved at {output_path}"
+async def data_fetcher(csv_file):
+    df = pd.read_csv(csv_file, parse_dates=["Date"])
+    df.set_index("Date", inplace=True)
+    print("Data sample:\n", df.head())
+    return df
 
-# ----------- Gemini LLM Config -----------
+async def analyst(df):
+    summary = df.describe()
+    df["Sales"].plot(kind='line', title="Sales Over Time")
+    plt.xlabel("Date")
+    plt.ylabel("Sales")
+    plt.savefig("output_plot.png")
+    plt.close()
+    return summary
 
-gemini_config = {
-    "model": "gemini/gemini-flash",
-    "api_key": "AIzaSyDQfCORIlizVMitSylE4km44CA7haRdgpU"  # <-- Replace with your Gemini Flash API key
-}
+async def main(csv_file):
+    print(f"Loading data from {csv_file}...")
+    df = await data_fetcher(csv_file)
+    
+    print("Analyzing data and creating plot...")
+    analysis = await analyst(df)
 
-# ----------- Agents -----------
-
-data_fetcher = GeminiAgent(
-    name="DataFetcher",
-    llm_config={"config_list": [gemini_config]},
-    system_message="You load CSV files and return summaries.",
-    tools=[load_csv]
-)
-
-analyst = GeminiAgent(
-    name="Analyst",
-    llm_config={"config_list": [gemini_config]},
-    system_message="You generate visualizations from CSV data.",
-    tools=[generate_plot]
-)
-
-user_agent = UserProxyAgent(name="User", human_input_mode="ALWAYS")
-
-# ----------- Group Chat Manager -----------
-
-from autogen.agentchat.contrib.multimodal import RoundRobinGroupChat
-
-group_chat = RoundRobinGroupChat(
-    agents=[user_agent, data_fetcher, analyst],
-    max_round=5
-)
-
-manager = GroupChatManager(groupchat=group_chat)
-
-# ----------- Async Runner -----------
-
-async def run_pipeline():
-    await user_agent.a_initiate_chat(
-        manager=manager,
-        message="Please load the CSV file 'sales_data.csv' and then generate a plot of 'Date' vs 'Sales'."
-    )
+    prompt = f"Here is a dataset summary:\n{analysis.to_string()}\nPlease provide insights or observations."
+    
+    print("Sending analysis prompt to Gemini Flash...")
+    result = await call_gemini_flash(prompt)
+    
+    print("Gemini Flash response:")
+    print(json.dumps(result, indent=2))
 
 if __name__ == "__main__":
-    asyncio.run(run_pipeline())
+    import sys
+    csv_file = sys.argv[1] if len(sys.argv) > 1 else "sales_data.csv"
+    asyncio.run(main(csv_file))
