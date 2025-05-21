@@ -2,16 +2,20 @@ import asyncio
 import pandas as pd
 import matplotlib.pyplot as plt
 import json
-import google.auth
+from google.oauth2 import service_account
 from google.auth.transport.requests import AuthorizedSession
 
-# Set your GCP info
-PROJECT_ID = "Data Pipeline"
-REGION = "asia-south1"  # Or another region like asia-south1
-MODEL = "gemini-1.5-flash"
 
-# Setup credentials
-credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+PROJECT_ID = "data-pipeline-460515"
+REGION = "us-central1"  
+MODEL = "gemini-1.5-flash"
+SERVICE_ACCOUNT_FILE = "key.json" 
+
+# === AUTHENTICATION ===
+SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+credentials = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES
+)
 authed_session = AuthorizedSession(credentials)
 
 async def call_gemini_flash(prompt: str):
