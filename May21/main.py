@@ -35,7 +35,7 @@ def generate_plot(filepath: str, x_col: str, y_col: str, output_path: str = "plo
 
 gemini_config = {
     "model": "gemini/gemini-flash",
-    "api_key": "your-gemini-api-key-here"  # <-- Replace with your Gemini Flash API key
+    "api_key": "AIzaSyDQfCORIlizVMitSylE4km44CA7haRdgpU"  # <-- Replace with your Gemini Flash API key
 }
 
 # ----------- Agents -----------
