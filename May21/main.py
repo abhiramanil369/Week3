@@ -1,96 +1,79 @@
 import asyncio
-from crewai import Agent
-from crewai_tools import GeminiTool, CodeInterpreterTool, FileReadTool, FileWriteTool
-from google.cloud import storage
-import os
-
-
-gemini = GeminiTool()
-code_interpreter = CodeInterpreterTool()
-file_reader = FileReadTool()
-file_writer = FileWriteTool()
-
-class DataFetcherAgent(Agent):
-    def __init__(self):
-        super().__init__(
-            name="Data Fetcher",
-            description="Fetches CSV data from Google Cloud Storage.",
-            llm=gemini,
-            tools=[file_reader, file_writer],
-            async_mode=True
-        )
-
-    async def fetch_data(self, bucket_name: str, blob_name: str, local_path: str = "temp.csv") -> str:
-      
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        blob.download_to_filename(local_path)
-        
-        return await self.tools[0].read(local_path)
-
-class AnalystAgent(Agent):
-    def __init__(self):
-        super().__init__(
-            name="Analyst",
-            description="Analyzes data using pandas and matplotlib.",
-            llm=gemini,
-            tools=[code_interpreter, file_writer],
-            async_mode=True
-        )
-
-    async def analyze_data(self, csv_content: str, output_dir: str = "outputs") -> list:
-        code = f'''
 import pandas as pd
 import matplotlib.pyplot as plt
-import io
-import os
 
-os.makedirs("{output_dir}", exist_ok=True)
-df = pd.read_csv(io.StringIO("""{csv_content}"""))
+from autogen import tool, UserProxyAgent, GroupChatManager
+from autogen.agentchat.contrib.gemini import GeminiAgent
 
-summary = df.describe().to_string()
-plots = []
-for col in df.select_dtypes(include='number').columns:
-    plt.figure()
-    df[col].hist(bins=20)
-    plt.title(f"Histogram of {{col}}")
-    plt.xlabel(col)
-    plt.ylabel("Frequency")
-    filepath = f"{output_dir}/hist_{{col}}.png"
-    plt.savefig(filepath)
-    plt.close()
-    plots.append(filepath)
+# ----------- Tools -----------
 
-with open(f"{output_dir}/summary.txt", "w") as f:
-    f.write(summary)
+@tool
+def load_csv(filepath: str):
+    """Load CSV and return summary statistics."""
+    df = pd.read_csv(filepath)
+    return {
+        "summary": df.describe().to_string(),
+        "columns": df.columns.tolist(),
+        "shape": df.shape
+    }
 
-plots.append(f"{output_dir}/summary.txt")
-plots
-'''
-        return await self.tools[0].interpret(code)
+@tool
+def generate_plot(filepath: str, x_col: str, y_col: str, output_path: str = "plot.png"):
+    """Generate a plot for given columns and save it."""
+    df = pd.read_csv(filepath)
+    plt.figure(figsize=(10, 6))
+    plt.plot(df[x_col], df[y_col], marker='o')
+    plt.xlabel(x_col)
+    plt.ylabel(y_col)
+    plt.title(f"{y_col} vs {x_col}")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(output_path)
+    return f"Plot saved at {output_path}"
 
-from crewai.process import RoundRobinGroupChat
+# ----------- Gemini LLM Config -----------
 
-class DataAnalysisGroupChat(RoundRobinGroupChat):
-    def __init__(self, agents):
-        super().__init__(agents=agents, async_mode=True)
+gemini_config = {
+    "model": "gemini/gemini-flash",
+    "api_key": "your-gemini-api-key-here"  # <-- Replace with your Gemini Flash API key
+}
 
-async def main(bucket_name: str, blob_name: str):
-    data_fetcher = DataFetcherAgent()
-    analyst = AnalystAgent()
-    group = DataAnalysisGroupChat([data_fetcher, analyst])
+# ----------- Agents -----------
 
-    csv_content = await data_fetcher.fetch_data(bucket_name, blob_name)
-    output_files = await analyst.analyze_data(csv_content)
-    print("Analysis complete. Generated files:")
-    for file in output_files:
-        print(f"- {file}")
+data_fetcher = GeminiAgent(
+    name="DataFetcher",
+    llm_config={"config_list": [gemini_config]},
+    system_message="You load CSV files and return summaries.",
+    tools=[load_csv]
+)
+
+analyst = GeminiAgent(
+    name="Analyst",
+    llm_config={"config_list": [gemini_config]},
+    system_message="You generate visualizations from CSV data.",
+    tools=[generate_plot]
+)
+
+user_agent = UserProxyAgent(name="User", human_input_mode="ALWAYS")
+
+# ----------- Group Chat Manager -----------
+
+from autogen.agentchat.contrib.multimodal import RoundRobinGroupChat
+
+group_chat = RoundRobinGroupChat(
+    agents=[user_agent, data_fetcher, analyst],
+    max_round=5
+)
+
+manager = GroupChatManager(groupchat=group_chat)
+
+# ----------- Async Runner -----------
+
+async def run_pipeline():
+    await user_agent.a_initiate_chat(
+        manager=manager,
+        message="Please load the CSV file 'sales_data.csv' and then generate a plot of 'Date' vs 'Sales'."
+    )
 
 if __name__ == "__main__":
-    
-    import sys
-    if len(sys.argv) < 3:
-        print("Usage: python data_analysis_pipeline_gcloud.py <bucket_name> <blob_name>")
-    else:
-        asyncio.run(main(sys.argv[1], sys.argv[2]))
+    asyncio.run(run_pipeline())
