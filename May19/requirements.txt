@@ -1,0 +1,4 @@
+google-generativeai
+group_chat
+gemini_utils
+dotenv
