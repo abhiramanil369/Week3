@@ -1,6 +1,14 @@
+<<<<<<< HEAD
 pandas
 matplotlib
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
+=======
+pandas
+matplotlib
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+>>>>>>> 2f9fd27071a88849c98120a922671b38c4c97ade
 requests
