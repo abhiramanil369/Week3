@@ -1,73 +1,106 @@
 import asyncio
 import pandas as pd
 import matplotlib.pyplot as plt
-import json
-from google.oauth2 import service_account
-from google.auth.transport.requests import AuthorizedSession
+from typing import Any, Dict, Optional, List
+from dataclasses import dataclass, field
 
+# -- LLM: Gemini (You'd replace this with your Gemini API client and logic) --
+class GeminiLLM:
+    async def chat(self, messages: List[Dict[str, str]]) -> str:
+        # Placeholder for Gemini LLM API call
+        # In production, this would call Gemini's chat endpoint
+        return "Gemini LLM response placeholder"
 
-PROJECT_ID = "data-pipeline-460515"
-REGION = "us-central1"  
-MODEL = "gemini-1.5-flash"
-SERVICE_ACCOUNT_FILE = "key.json" 
+# -- Tool: Pandas Wrapper --
+class PandasTool:
+    @staticmethod
+    async def read_csv_async(filepath: str) -> pd.DataFrame:
+        # Async wrapper for reading CSV (simulate async with thread)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, pd.read_csv, filepath)
 
-# === AUTHENTICATION ===
-SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
-)
-authed_session = AuthorizedSession(credentials)
+    @staticmethod
+    async def describe_async(df: pd.DataFrame) -> Dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: df.describe().to_dict())
 
-async def call_gemini_flash(prompt: str):
-    endpoint = f"https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{REGION}/publishers/google/models/{MODEL}:predict"
-    payload = {
-        "instances": [
-            {
-                "prompt": prompt,
-            }
-        ],
-        "parameters": {
-            "temperature": 0.7,
-            "maxOutputTokens": 500,
-            "topP": 0.8,
-            "topK": 40
+# -- Tool: Matplotlib Wrapper --
+class MatplotlibTool:
+    @staticmethod
+    async def plot_async(df: pd.DataFrame, kind: str = "line", output_path: str = "plot.png"):
+        loop = asyncio.get_event_loop()
+        def plot_and_save():
+            ax = df.plot(kind=kind)
+            fig = ax.get_figure()
+            fig.savefig(output_path)
+            plt.close(fig)
+            return output_path
+        return await loop.run_in_executor(None, plot_and_save)
+
+# -- Agent: Data Fetcher --
+@dataclass
+class DataFetcherAgent:
+    llm: GeminiLLM
+
+    async def fetch(self, csv_path: str) -> pd.DataFrame:
+        # In a real scenario, you might fetch from a URL or database
+        df = await PandasTool.read_csv_async(csv_path)
+        return df
+
+# -- Agent: Analyst --
+@dataclass
+class AnalystAgent:
+    llm: GeminiLLM
+
+    async def analyze(self, df: pd.DataFrame) -> Dict[str, Any]:
+        description = await PandasTool.describe_async(df)
+        return description
+
+    async def visualize(self, df: pd.DataFrame, kind: str = "line") -> str:
+        output_path = f"plot_{kind}.png"
+        await MatplotlibTool.plot_async(df, kind=kind, output_path=output_path)
+        return output_path
+
+# -- Group Chat Orchestrator --
+@dataclass
+class SelectorGroupChat:
+    agents: Dict[str, Any]
+    llm: GeminiLLM
+
+    async def run(self, csv_path: str, plot_kind: str = "line") -> Dict[str, Any]:
+        # Step 1: Fetch Data
+        fetcher = self.agents["fetcher"]
+        analyst = self.agents["analyst"]
+
+        # Fetch CSV
+        df = await fetcher.fetch(csv_path)
+        # Analyze Data
+        analysis = await analyst.analyze(df)
+        # Visualize Data
+        plot_path = await analyst.visualize(df, kind=plot_kind)
+
+        # LLM summary
+        summary = await self.llm.chat([
+            {"role": "system", "content": "You are an expert data analyst."},
+            {"role": "user", "content": f"Data analysis summary: {analysis}"}
+        ])
+
+        return {
+            "analysis": analysis,
+            "plot_path": plot_path,
+            "llm_summary": summary
         }
-    }
-    response = authed_session.post(endpoint, json=payload)
-    response.raise_for_status()
-    return response.json()
 
-async def data_fetcher(csv_file):
-    df = pd.read_csv(csv_file, parse_dates=["Date"])
-    df.set_index("Date", inplace=True)
-    print("Data sample:\n", df.head())
-    return df
+# -- Main Pipeline Function --
+async def main(csv_path: str, plot_kind: str = "line"):
+    llm = GeminiLLM()
+    fetcher = DataFetcherAgent(llm)
+    analyst = AnalystAgent(llm)
+    chat = SelectorGroupChat(agents={"fetcher": fetcher, "analyst": analyst}, llm=llm)
+    results = await chat.run(csv_path, plot_kind)
+    print("Analysis Summary:")
+    print(results["llm_summary"])
+    print(f"Visualization saved to: {results['plot_path']}")
 
-async def analyst(df):
-    summary = df.describe()
-    df["Sales"].plot(kind='line', title="Sales Over Time")
-    plt.xlabel("Date")
-    plt.ylabel("Sales")
-    plt.savefig("output_plot.png")
-    plt.close()
-    return summary
-
-async def main(csv_file):
-    print(f"Loading data from {csv_file}...")
-    df = await data_fetcher(csv_file)
-    
-    print("Analyzing data and creating plot...")
-    analysis = await analyst(df)
-
-    prompt = f"Here is a dataset summary:\n{analysis.to_string()}\nPlease provide insights or observations."
-    
-    print("Sending analysis prompt to Gemini Flash...")
-    result = await call_gemini_flash(prompt)
-    
-    print("Gemini Flash response:")
-    print(json.dumps(result, indent=2))
-
-if __name__ == "__main__":
-    import sys
-    csv_file = sys.argv[1] if len(sys.argv) > 1 else "sales_data.csv"
-    asyncio.run(main(csv_file))
+# Example usage:
+# asyncio.run(main("your_data.csv", plot_kind="bar"))
